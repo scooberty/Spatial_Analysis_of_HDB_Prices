@@ -18,3 +18,9 @@ cache/
 *_cache/
 *_files/
 .Rproj.user/
+
+# Ignore data files
+data/
+*.csv
+*.xlsx
+*.zip
