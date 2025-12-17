@@ -1,0 +1,570 @@
+---
+title: "Group 13"
+author: "Liying Choo, A0172633H; Lim Kay Yee Rachel, A0114716L"
+date: "`r Sys.Date()`"
+output: 
+  bookdown::pdf_document2:
+    fig_caption: yes
+    number_sections: false
+    latex_engine: xelatex
+    keep_tex: true
+    toc: false
+    extra_dependencies: ["xurl"]
+  bookdown::html_document2:
+    fig_caption: yes
+    number_sections: false
+header-includes:
+  - \usepackage{fontspec}
+  - \setmainfont{Arial}
+  - \usepackage[dvipsnames]{xcolor}         % richer named colors
+  - \usepackage{sectsty}                    % color section headings
+  - \sectionfont{\color{Blue}}
+  - \subsectionfont{\color{Blue}}
+  - \subsubsectionfont{\color{Blue}}
+  - \usepackage{hyperref}                   % color hyperlinks
+  - \hypersetup{colorlinks=true, linkcolor=Blue, urlcolor=Blue, citecolor=Blue}
+---
+
+```{=html}
+<style type="text/css">
+  
+  body{ /* Normal  */
+      font-size: 11px;
+  }
+td {  /* Table  */
+    font-size: 8px;
+}
+h1.title {
+  font-size: 34px;
+  color: Black;
+  text-align: center;
+}
+h4.author {
+  font-size: 22px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: Black;
+  text-align: center;
+}
+h4.date { 
+  font-size: 16px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: Black;
+  text-align: center;
+}
+h1 { /* Header 1 */
+    font-size: 16px;
+  color: Blue;
+}
+h2 { /* Header 2 */
+    font-size: 16px;
+  color: Blue;
+}
+h3 { /* Header 3 */
+    font-size: 16px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: Blue;
+}
+code.r{
+  font-size: 11px;
+}
+pre {
+  font-size: 14px;
+}
+
+table {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+img {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE, warning = FALSE, results='hide'}
+packages <- c("sf", 
+              "sp",
+              "spatstat",
+              "gstat",
+              "spdep", 
+              "nlme",
+              "SpatialEpi",
+              "spatialreg",
+              "terra",
+              "ggplot2", 
+              "dplyr",
+              "purrr",
+              "geodata", 
+              "tidyterra",
+              "patchwork",
+              "knitr", 
+              "tidyverse",
+              "httr",
+              "broom",
+              "kableExtra",
+              "car",
+              "webshot",
+              "webshot2")
+
+lapply(packages, library, character.only = TRUE)
+rm(packages)
+```
+\newpage # PART II: Course Project
+
+## Introduction
+
+## Data Overview
+
+1.  resale (Data Type: Attribute; Source: <https://data.gov.sg/datasets?topics=housing&query=hdb+price&resultId=d_8b84c4ee58e3cfc0ece0d773c8ca6abc>)
+2.  sg_boundary (Data Type: Attribute; Source: <https://data.gov.sg/datasets?query=subzone&resultId=d_8594ae9ff96d0c708bc2af633048edfb>)
+3.  hdb (Data Type: Attribute; Source: <https://github.com/BlueSkyLT/siteselect_sg>)
+4.  CHASClinics (Data Type: Attribute; Source: <https://data.gov.sg/datasets/d_548c33ea2d99e29ec63a7cc9edcccedc/view>)
+5.  LTAMRTStationExitGEOJSON (Data Type: Attribute; Source: <https://data.gov.sg/datasets?query=lta+mrt+station+exit&resultId=d_b39d3a0871985372d7e1637193335da5&sidebar=false>)
+6.  LTASchoolZone (Data Type: Attribute; Source: <https://data.gov.sg/datasets?query=lta+school+zoner&resultId=d_abf023b38d9bc451484e3d67b562bc5c&sidebar=false>)
+7.  NEAMarketandFoodCentre (Data Type: Attribute; Source: <https://data.gov.sg/datasets?query=nea+market+and+food+cent&resultId=d_a57a245b3cf3ec76ad36d55393a16e97>)
+8.  Parks (Data Type: Attribute; Source: <https://data.gov.sg/datasets/d_0542d48f0991541706b58059381a6eca/view>)
+
+## Problem to be investigated and statistical methods used
+
+We are analysing spatial patterns in HDB resale prices from 2017-2025 across Singapore.
+
+\underline{Research Question:}
+
+1.  Is the strength of the relationship between HDB flat size and resale prices spatially clustered across Singapore’s planning areas?
+
+-   **Statistical_Method**: Global Moran's I on area-specific size–price regression coefficients
+
+2.  Which planning areas show stronger or weaker links between flat size and resale price, compared to their neighbouring planning areas?
+
+-   **Statistical_Method**: Local Moran's I for on area-specific size–price regression coefficients
+
+3.  Which specific amenity features (amongst MRT, school, retail, park, and healthcare proximity) are the strongest factors in explaining variation in the marginal willingness to pay for additional floor area (beta_size_price) across Singapore’s planning areas?
+
+-   **Statistical_Method**: OLS Regression, SAR Model
+
+# Main analysis
+
+## Data cleaning and simple descriptive analysis
+
+```{r data-cleaning, include=FALSE}
+# Read areal data for Singapore
+sg_boundary <- st_read("beta_size_price/MasterPlan2019SubzoneBoundaryNoSeaGEOJSON.geojson")
+names(sg_boundary)
+head(sg_boundary)
+
+# Extract zones from description
+sg_boundary$SUBZONE_N <- str_match(
+  sg_boundary$Description,
+  "<th>SUBZONE_N</th> <td>([^<]+)</td>"
+)[,2]
+
+sg_boundary$PLN_AREA_N <- str_match(
+  sg_boundary$Description,
+  "<th>PLN_AREA_N</th> <td>([^<]+)</td>"
+)[,2]
+
+sg_boundary$REGION_N <- str_match(
+  sg_boundary$Description,
+  "<th>REGION_N</th> <td>([^<]+)</td>"
+)[,2]
+
+sg_boundary <- sg_boundary %>% 
+  select(SUBZONE_N, PLN_AREA_N, REGION_N, geometry)
+
+sg_boundary<- sg_boundary %>% 
+  st_make_valid()
+
+# recreate polygons for planning areas
+sg_boundary <- sg_boundary %>%
+  group_by(PLN_AREA_N) %>%
+  summarise(geometry = st_union(geometry)) %>%
+  ungroup()
+
+# Read resale price data
+resale <- read_csv("beta_size_price/ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv")
+
+# Read HDB coordinate data
+hdb <- read_csv("beta_size_price/hdb.csv")
+
+# Merge coordinate data to resale price data
+resale_combined <- resale %>%
+  left_join(hdb, by = c("block" = "blk_no",
+                               "street_name" = "street")) %>% 
+  select(-c(12:34))
+
+# Convert to sf object and set coordinates to EPSG 4326
+resale_sf <- st_as_sf(
+  resale_combined,
+  coords = c("lng", "lat"),
+  crs = 4326  # WGS 84, standard lat/lon CRS
+)
+
+st_crs(resale_sf)
+
+# Set coordinates of areal data to EPSG 4326
+st_crs(sg_boundary) <- 4326
+
+# Estimate beta_size_price for Moran's I test 
+coeff <- resale_sf %>%
+  st_drop_geometry() %>%
+  filter(!is.na(resale_price), !is.na(floor_area_sqm), !is.na(PLN_AREA_N)) %>%
+  group_by(PLN_AREA_N) %>%
+  do({
+    model <- lm(resale_price ~ floor_area_sqm, data = .)
+    tidy(model) %>% filter(term == "floor_area_sqm")
+  }) %>%
+  ungroup() %>%
+  select(PLN_AREA_N, estimate) %>%
+  rename(beta_size_price = estimate)
+
+# Join beta estimate data back to sg_boundary
+sg_boundary <- sg_boundary %>%
+  left_join(coeff, by = "PLN_AREA_N") %>%
+  filter(!is.na(beta_size_price)) 
+
+# aggregate for descriptive statistics
+resale_aggregated <- resale_sf %>%
+  st_drop_geometry() %>%
+  group_by(PLN_AREA_N) %>%
+  summarise(
+    med_price = median(resale_price, na.rm = TRUE),
+    med_sqm = median(floor_area_sqm, na.rm = TRUE),
+    med_psqm = median(resale_price/floor_area_sqm, na.rm = TRUE))
+
+# Clean environment
+rm(hdb, resale, resale_combined)
+```
+
+The `hdb` and `resale` datasets were merged into a single dataset, `resale_sf`, which contains flat attribute data linked to geometry point data for each HDB flat. For clarity, the data cleaning code chunks to merge datasets have been hidden from the PDF output. This dataset comprises of 218018 observations of HDB unit market resale prices between January 2017 and November 2025. We can see that we do not have resale prices across all planning areas, only in some of them.
+
+```{r}
+# Plot geostatistical data
+ggplot() +
+  geom_sf(data = sg_boundary, fill = "grey95", color = "grey") +
+  geom_sf(data = resale_sf, aes(color = resale_price), size = 1, alpha = 0.6) +
+  scale_color_gradient(low = "lightpink", high = "red", na.value = "grey90") +
+  labs(title = "HDB resale market prices (point data)",
+       color = "Resale market price (SGD$)") +
+  theme_bw()
+```
+
+The `resale_aggregated` dataset has been created to summarise the median price, median square meters (flat size), and median price per square meter of each of the 31 planning areas with resale price data.
+
+Visually, we observe that HDB resale prices are higher in planning areas close to the center of the map, and prices per square meter are also higher closer to the center of the map. The size by floor square meter appears to be larger when moving away from the center,
+
+```{r}
+plot <- sg_boundary %>%
+  left_join(resale_aggregated, by = "PLN_AREA_N")
+
+p1 <- ggplot(plot) +
+  geom_sf(aes(fill = med_price), color = "white") +
+  scale_fill_gradient(low = "lightpink", high = "red", na.value = "grey90") +
+  labs(title = "Median resale price", fill = "Median Price") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p2 <- ggplot(plot) +
+  geom_sf(aes(fill = med_psqm), color = "white") +
+  scale_fill_gradient(low = "lightpink", high = "red", na.value = "grey90") +
+  labs(title = "Median price per sqm", fill = "Price per sqm") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p3 <- ggplot(plot) +
+  geom_sf(aes(fill = med_sqm), color = "white") +
+  scale_fill_gradient(low = "lightpink", high = "red", na.value = "grey90") +
+  labs(title = "Median flat size (sqm)", fill = "Median Size") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Combine using patchwork
+blank <- ggplot() + theme_void()
+
+combined_plot <- (p1 | p2) / (p3 | blank)
+combined_plot
+```
+
+Of the 55 planning areas in Singapore, 31 contained HDB resale transaction and we include these in the estimation of area-level size–price coefficients. The remaining 24 planning areas with no transactions are excluded from the Global and Local Moran’s I calculations.
+
+The `sg_boundary` dataset has been cleaned to contain the areal geometry data of 31 planning areas in Singapore where resale price data exists in `resale_sf`. Planning areas were selected as the unit of analysis because they provide an appropriate level of geographic granularity for comparing neighbouring districts, without being as broad and heterogeneous as regions or as highly fragmented as subzones.
+
+```{r}
+sg_boundary %>% st_drop_geometry() %>%
+  summarise(n = n_distinct(PLN_AREA_N)) %>% pull(n)
+
+ggplot(sg_boundary) +
+  geom_sf(aes(fill = PLN_AREA_N)) +
+  theme_bw() +
+  guides(fill = "none")
+```
+
+To examine whether the strength of the size–price relationship exhibits spatial clustering later, we first estimated a planning-area–specific price–size coefficient (`beta_size_price`), by running a linear model resale_price \~ floor_area_sqm for each planning area. The result was saved in `sg_boundary`. The response variable exhibits non-normality, with some outliers.
+
+```{r, fig.width=4, fig.height=3}
+ggplot(coeff, aes(x = beta_size_price)) +
+  geom_histogram(bins = 15) +
+  theme_bw()
+```
+
+## Research Question 1: Is the strength of the relationship between HDB flat size and resale prices spatially clustered across Singapore’s planning areas?
+
+### Assess spatial autocorrelation of the strength of the HDB size–price relationship, using Global permutation test for Moran’s I on planning-area size–price coefficients.
+
+\underline{Response Variable}
+
+-   `beta_size_price`: The coefficient of the following regression was used as the size-price coefficient: lm(resale_price \~ floor_area_sqm).
+
+Permutation test (Moran's I) was chosen as the response variable, as the normality assumption may not hold for the size-price coefficient (`beta_size_price`), and we do not have information on differences in distributions of these slope coefficients.
+
+First, we create the neighbour list using queen-style contiguity. Queen-style is more appropriate as planning areas that are touching even at one point should be considered neighbours, given the polygons' irregular shapes.
+
+We then created two types of spatial weights from the neighbour list: W weights (row-standardized) and B weights (binary). Using both allows us to check the robustness of our results to different weighting schemes.
+
+```{r}
+nb_queen_2 <- poly2nb(sg_boundary, queen = TRUE)
+
+w_weight <- nb2listw(nb_queen_2, style = "W")
+b_weight <- nb2listw(nb_queen_2, style = "B")
+
+set.seed(5226)
+moran_global_w <- moran.mc(sg_boundary$beta_size_price, w_weight, nsim = 999)
+set.seed(5226)
+moran_global_b <- moran.mc(sg_boundary$beta_size_price, b_weight, nsim = 999)
+```
+
+```{r}
+moran_global_w
+moran_global_b
+```
+
+Both W and B weights produced outputs of p-values that are smaller than .05. This indicates robust evidence that the strength of the size–price relationship exhibits spatial clustering across Singapore’s planning areas. i.e. planning areas with stronger price–size relationships tend to be located near areas exhibiting similarly strong relationships.
+
+## Research Question 2: Which planning areas show stronger or weaker links between flat size and resale price, compared to their neighbouring planning areas?
+
+### Detect clusters using Local Moran's I
+
+Local Moran’s I (LISA) is used to identify clusters of areas with strong or weak size–price relationships relative to their neighbours.
+
+```{r, warning=FALSE}
+loc_moran_2 <- localmoran(sg_boundary$beta_size_price, w_weight, alternative = "two.sided")
+
+mp_2 <- moran.plot(sg_boundary$beta_size_price, w_weight)
+
+sg_boundary$quadrant <- NA
+p.2side <- loc_moran_2[, "Pr(z != E(Ii))"]
+
+# high-high
+sg_boundary[(mp_2$x >= 0 & mp_2$wx >= 0) & (p.2side <= 0.05), "quadrant"] <- 1
+
+# low-low
+sg_boundary[(mp_2$x <= 0 & mp_2$wx <= 0) & (p.2side <= 0.05), "quadrant"] <- 2
+
+# high-low
+sg_boundary[(mp_2$x >= 0 & mp_2$wx <= 0) & (p.2side <= 0.05), "quadrant"] <- 3
+
+# low-high
+sg_boundary[(mp_2$x <= 0 & mp_2$wx >= 0) & (p.2side <= 0.05), "quadrant"] <- 4
+
+# non-significant
+sg_boundary[(p.2side > 0.05), "quadrant"] <- 5
+
+ggplot(data = sg_boundary) + 
+  geom_sf(aes(fill=as.factor(quadrant))) +
+  geom_sf_text(
+    data = subset(sg_boundary, quadrant %in% c(1,2,3,4)),
+    aes(label = PLN_AREA_N),
+    size = 1.5, color = "black") +
+  
+ coord_sf(expand = FALSE) +
+ scale_fill_manual(breaks=c(1,2,3,4,5),
+ labels = c("High-High", "Low-Low", "High-Low", "Low-High", "Non-significant"),
+ values=c("red", "blue", "lightpink", "skyblue2", "white")) +
+ theme(legend.title=element_blank())
+```
+
+Based on the plot, the local Moran’s I identified High–High clusters of planning areas located in Central and Southern Singapore. These areas have a stronger price–size relationship (higher size–price coefficients) and are surrounded by planning areas with similarly strong relationships. There were no detectable clustering elsewhere.
+
+## Research Question 3: Amongst the identified amenity features (MRT, school, retail, park, and healthcare proximity), which are the strongest factors in explaining variation in the marginal willingness to pay for additional floor area (beta_size_price) across Singapore’s planning areas?
+
+### Assess how proximity to five key amenities explains variation in the size–price gradient across planning areas using an OLS regression, followed by a Simultaneous Autoregressive (SAR) model to correct for residual spatial dependence
+
+\underline{Data Processing Amenity Variables and Creating the `sg\_boundary\_amenities` spatial object for study}
+
+To understand the possible factors underlying the differential strength of the resale size–price relationship across Singapore’s planning areas, five categories of spatial amenities were incorporated into the analysis: (1) healthcare, (2) public transport, (3) public education, (4) markets and food centres, and (5) recreational parks. The corresponding datasets used - `chas_clinics`, `mrt_exits`, `school_zones`, `market_and_food_centres`, and `parks` - act as useful approximations for the spatial presence of the abovementioned amenities. These datasets were obtained from data.gov.sg as GeoJSON files containing geospatial geometries and coordinate information. All amenity layers were imported and transformed into the same coordinate reference system (CRS) as the planning‐area polygons in `sg_boundaries` to ensure spatial compatibility. As with earlier sections, the full data-processing code has been concealed from the PDF output for readability.
+
+Centroid points were then computed for every planning area in a new spatial object, `sg_boundary_amenities`, representing the approximate centre of housing activity within each region. For 4 point-based amenities (MRT exits, CHAS clinics, markets and food centres, and parks), we calculated the minimum Euclidean distance from each centroid to the nearest amenity of the respective type. School zones, which are provided as polygonal regions, were converted into representative point locations using `st_point_on_surface()`. The resulting points, effectively the centroids of the school-zone polygons, were then used to compute the minimum Euclidean distance from each planning-area centroid to the nearest school zone. The different data processing done for the different amenities were conducted in consideration of the original data representation type in their GeoJSON files. The final dataset therefore augments each planning area with five continuous proximity indicators, all measured in metres.
+
+All spatial analyses — including the estimation of `beta_size_price` and the Global and Local Moran’s I diagnostics — were conducted on the same subset of 31 planning areas as in the earlier sections.
+
+The resulting dataset, `sg_boundary_amenities`, contains one polygon geometry for each included planning area, together with eight attributes:
+
+-   `PLN_AREA_N` – planning-area name.
+-   `geometry` – planning-area polygon (sf object, EPSG:4326).
+-   `quadrant` – Local Moran’s I cluster classification (high–high, low–low, high–low, low–high, or non-significant).
+
+\underline{Response Variable}
+
+-   `beta_size_price` – estimated marginal willingness to pay for an additional square metre, obtained from planning area-level resale regressions conducted above
+
+\underline{Predictor Variables - i.e. Amenity Variables}
+
+-   `dist_mrt` – minimum centroid-to-MRT distance (m).
+-   `dist_market_and_food_centres` – minimum centroid-to-market/food centre distance (m).
+-   `dist_clinic` – minimum centroid-to-clinic distance (m).
+-   `dist_school` – minimum centroid-to-school-zone (centroid) distance (m).
+-   `dist_park` – minimum centroid-to-park distance (m).
+
+All five amenity variables were computed consistently from the same set of centroids, ensuring comparability across planning areas can. Importantly, the cleaned dataset contains no missing values for any variable used in Research Question 3.
+
+In generating the centroids for the amenities, we have assumed that the centre of the planning areas is also the centre of all housing activity within the planning area, and that housing activity is uniformly distributed within the planning area. To the best effort, the most suitable approximate data has been used to represent the locations of the amenities. In addition, for the purposes of this analysis, we assume that all amenities within each category have been accurately captured by the 5 datasets used.
+
+```{r amenities-data-processing, include=FALSE}
+sg_boundary_amenities <- sg_boundary
+
+# Read amenity GeoJSON files
+chas_clinics   <- st_read("Amenities/CHASClinics.geojson", quiet = TRUE)
+mrt_exits      <- st_read("Amenities/LTAMRTStationExitGEOJSON.geojson", quiet = TRUE)
+school_zones   <- st_read("Amenities/LTASchoolZone.geojson", quiet = TRUE)
+market_and_food_centres        <- st_read("Amenities/NEAMarketandFoodCentre.geojson", quiet = TRUE)
+parks          <- st_read("Amenities/Parks.geojson", quiet = TRUE)
+
+# Make sure everything is in same CRS
+target_crs <- st_crs(sg_boundary_amenities)
+chas_clinics <- st_transform(chas_clinics, target_crs) #best approximate locations that could be found and mapped to sg_boundary
+mrt_exits    <- st_transform(mrt_exits, target_crs)
+school_zones <- st_transform(school_zones, target_crs) #best approximate locations that could be found and mapped to sg_boundary
+market_and_food_centres      <- st_transform(market_and_food_centres, target_crs)
+parks        <- st_transform(parks, target_crs)
+
+# Compute centroids of planning areas
+centroids <- st_centroid(sg_boundary_amenities)
+
+# Helper function: min distance from each centroid to a set of points
+min_dist_to <- function(from_pts, to_sf) {
+  dist_mat <- st_distance(from_pts, to_sf)
+  apply(dist_mat, 1, min) |> as.numeric()
+}
+
+# Convert school zones to centroids (represents approximate school locations)
+school_centroids <- st_point_on_surface(st_zm(school_zones))
+
+# Calculate amenity distances
+sg_boundary_amenities <- sg_boundary_amenities %>%
+  mutate(
+    dist_mrt     = min_dist_to(centroids, mrt_exits),
+    dist_market_and_food_centres  = min_dist_to(centroids, market_and_food_centres),
+    dist_clinic  = min_dist_to(centroids, chas_clinics),
+    dist_school  = min_dist_to(centroids, school_centroids),
+    dist_park    = min_dist_to(centroids, parks)
+  )
+
+# Inspect results
+summary(sg_boundary_amenities)
+
+```
+
+As a start, the spatial patterns in amenity proximity across Singapore can be visualised in the set of choropleth maps below. The maps display minimum centroid-to-amenity distances for all five amenity types, and provide an initial overview of how the proximity and access to amenities varies regionally and forms the foundation for the analysis presented later.
+
+```{r}
+#Plot the distribution of all amenities by planning area
+plot_list <- lapply(c("dist_mrt", "dist_market_and_food_centres", 
+                      "dist_clinic", "dist_school", "dist_park"), 
+  function(var) {
+    ggplot(sg_boundary_amenities) +
+      geom_sf(aes(fill = .data[[var]]), color = NA) +
+      scale_fill_viridis_c() +
+      labs(title = gsub("dist_", "", var), fill = "m") +
+      theme_void() +
+      theme(
+        plot.title = element_text(size = 10, hjust = 0.5))})
+
+wrap_plots(plot_list, ncol = 3) +
+  plot_annotation(title = "Distance from Amenities to Centroids of Planning Area")
+
+```
+
+\underline{OLS Model Fitting}
+
+We first carry out an OLS model to act as an initial, non-spatial assessment of how proximity to key amenities relates to the strength of the resale size–price gradient across Singapore’s planning areas. While the model explains a moderate proportion of the variation in `beta_size_price` (R² = 0.565), only three amenities show statistically significant associations: planning areas located further from markets/food centres and further from parks tend to exhibit lower size–price gradients, whereas areas further from schools show higher gradients. Distance to MRT exits and clinics are not statistically meaningful predictors. However, the residual spread suggests that important spatial structure is left unmodelled.
+
+```{r}
+# Fit OLS model
+ols_model <- lm(beta_size_price ~ dist_mrt + dist_market_and_food_centres + dist_clinic +
+                dist_school + dist_park,
+                data = sg_boundary_amenities)
+
+summary(ols_model)
+
+# Extract residuals
+ols_res <- residuals(ols_model)
+
+```
+
+\underline{Moran I's test to understand if there is spatial autocorrelation}
+
+```{r}
+moran_ols <- moran.test(ols_res, nb2listw(nb_queen_2))
+moran_ols
+```
+
+Because the Moran’s I test on the OLS residuals revealed significant positive spatial autocorrelation (I = 0.3565, p = 0.0012), the OLS assumptions of independent errors were violated, indicating that nearby planning areas still share unexplained similarities even after controlling for amenity proximity
+
+\underline{Modelling spatial dependence via a SAR model}
+
+To explicitly model this remaining spatial dependence, we constructed a queen-contiguity spatial weights matrix and row-standardised it (W-style) using `nb2listw()`. We then fitted a spatial error model via `spautolm()` with the same set of predictor variables. In this specification, spatial dependence is captured in the error term rather than in the outcome itself: the model assumes that unobserved factors are spatially correlated across neighbouring planning areas. Comparing the spatial error model to the baseline OLS allows us to assess whether accounting for this spatially structured error process meaningfully changes the estimated effects of amenity proximity on the size–price gradient and reduces residual spatial autocorrelation.
+
+```{r}
+# Spatial weights (W-style row-standardized)
+lw <- nb2listw(nb_queen_2, style = "W")
+
+# Fit Spatial Error Model
+sar_model <- spautolm(
+  beta_size_price ~ dist_mrt + dist_market_and_food_centres  + dist_clinic + dist_school + dist_park,
+  data = sg_boundary_amenities,
+  listw = lw,
+  family = "SAR"
+)
+
+summary(sar_model)
+```
+
+### Results: Top Factors Affecting the Size–Price Gradient (`beta_size_price`)
+
+The spatial error model improves upon the OLS results by explicitly accounting for spatially correlated unobserved factors (λ = 0.502, p = 0.011). After controlling for spatial dependence, three amenity variables emerge as the strongest predictors of the size–price gradient:
+
+1.  Distance to Schools (`dist_school`) was the strongest predictor of size–price gradient
+
+-   Estimate = +4.62, p \< 0.001
+-   Planning areas further from school zones exhibit substantially higher beta_size_price
+-   Interpretation: In areas with limited access to schools, buyers appear to value additional floor area more strongly. This may reflect that larger homes compensate for weaker school access, or that school-rich regions attract buyers for reasons less to home size.
+
+2.  Distance to Parks (`dist_park`) was also another significant negative predictor of size–price gradient
+
+-   Estimate = –2.88, p = 0.0039
+-   Areas further from parks exhibit lower beta_size_price.
+-   Interpretation: Access to recreational space enhances willingness to pay for additional indoor space—perhaps due to lifestyle complementarities (e.g., family-oriented neighbourhoods valuing both greenery and interior space).
+
+In summary, school proximity and park proximity are the strongest determinants of why some planning areas exhibit steeper size–price relationships than others. Other factors like Market & Food Centre proximity, MRT station proximity, and clinic proximity showed less significant association with `beta_size_price`, indicating that while these amenities may affect overall resale prices, they do not meaningfully influence the marginal value of additional floor area.
+
+# Conclusion
+
+Across all 31 planning areas with available HDB resale transactions, our analysis reveals clear spatial structure in how strongly resale flat size influences their prices.
+
+Research Question 1 established that the size–price gradient (`beta_size_price`) is not randomly distributed: both W- and B-style Moran’s I permutation tests detected significant positive spatial autocorrelation, indicating that planning areas with strong (or weak) size–price relationships tend to cluster geographically.
+
+Research Question 2 used Local Moran’s I to map these patterns, identifying a prominent High–High cluster in the central and southern regions of Singapore, where planning areas consistently exhibit steeper size–price gradients alongside similarly strong neighbours. No Low–Low clusters were detected, suggesting that weak size–price relationships are more spatially dispersed.
+
+Building on these spatial patterns, Research Question 3 examined whether variation in proximity to key amenities helps explain why some areas exhibit steeper size–price relationships than others. Using an OLS model followed by a SAR spatial error model to correct for residual spatial dependence, we found that two amenities: schools and parks emerged as the top two strongest predictors of `beta_size_price`. Interestingly, areas located further from school zones had systematically higher size–price gradients, while poorer access to parks was associated with lower gradients. In contrast, distances to markets/food centres, MRT stations and clinics showed much weaker meaningful influence as a predictor of `beta_size_price`. Together, these results suggest that while overall resale prices are affected by many factors, the marginal willingness to pay for additional space is most strongly shaped by school proximity and recreational environments - and that these effects operate within a spatially dependent urban structure.
+
+# AI use disclaimer and References
+
+AI tools (ChatGPT-5 and Claude) were used to support code troubleshooting, documentation writing, and refinement of explanations. The analytical design, modelling choices, and final interpretations were fully determined by the authors. No paper and books beyond lecture notes were referenced.
